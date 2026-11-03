@@ -1,0 +1,7 @@
+# Replace with your domain (or <vps-ip-with-dashes>.sslip.io if you have none).
+# HTTPS is mandatory: browsers block the camera on plain http.
+tcg.example.com {
+	root * /var/www/tcg_opening_app
+	file_server
+	encode gzip
+}
