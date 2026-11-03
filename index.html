@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pack Opening Live</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#07080f; --panel:#11131f; --line:#ffffff14; --text:#f2f4ff; --muted:#8d93b0;
+    --gold:#ffd25e; --red:#ff4d6d; --tile:360px;
+    --holo:linear-gradient(115deg,#ff6ec7,#ffd36e,#7cffb2,#6ec8ff,#b06eff,#ff6ec7);
+  }
+  * { box-sizing:border-box; scrollbar-width:none; }
+  *::-webkit-scrollbar { display:none; }
+  body {
+    margin:0; min-height:100vh; color:var(--text); font-family:Inter,system-ui,sans-serif;
+    background:
+      radial-gradient(60vw 60vw at 10% -10%, #6e3bff33, transparent 60%),
+      radial-gradient(50vw 50vw at 110% 110%, #00d0ff26, transparent 60%),
+      var(--bg);
+  }
+  @keyframes holo { to { background-position:300% 0; } }
+  @keyframes scroll { to { transform:translateX(-50%); } }
+  .holo { background:var(--holo); background-size:300% 100%; animation:holo 8s linear infinite; }
+  @media (prefers-reduced-motion: reduce) { .holo, .tile.focus::before, .track { animation:none !important; } }
+
+  select { font:inherit; border-radius:999px; padding:11px 18px; border:1px solid var(--line); background:#0009; color:var(--text); }
+  select option { background:#11131f; }
+  button, input, textarea { font:inherit; border-radius:999px; padding:11px 18px; border:1px solid var(--line); }
+  input, textarea { background:#0009; color:var(--text); outline:none; transition:border-color .2s; }
+  textarea { border-radius:14px; resize:vertical; min-height:110px; font-size:13px; }
+  input:focus, textarea:focus { border-color:var(--gold); }
+  input[type=range] { padding:0; border:none; background:none; accent-color:var(--gold); width:110px; }
+  button { background:#ffffff0d; color:var(--text); cursor:pointer; font-weight:600; font-size:14px; transition:transform .15s, background .2s; }
+  button:hover { background:#ffffff1f; transform:translateY(-1px); }
+  button.main { color:#111; border:none; font-size:16px; letter-spacing:.03em; }
+  button.danger { background:#ff4d6d22; border-color:#ff4d6d55; color:#ffb3c0; }
+
+  .brand { font-family:'Bebas Neue',Impact,sans-serif; letter-spacing:.04em; line-height:.9; }
+  .live { display:inline-flex; align-items:center; gap:6px; font:700 11px Inter,sans-serif; letter-spacing:.12em;
+          background:var(--red); color:#fff; padding:4px 9px; border-radius:999px; vertical-align:middle; }
+  .live::before { content:''; width:7px; height:7px; border-radius:50%; background:#fff; animation:blink 1.2s infinite; }
+  @keyframes blink { 50% { opacity:.25; } }
+
+  /* lobby styled like a trading card: holo frame + dark inner face */
+  #lobby { min-height:100vh; display:grid; place-items:center; padding:24px 16px; }
+  .card { width:min(380px,100%); padding:3px; border-radius:22px; box-shadow:0 30px 80px #000a, 0 0 60px #b06eff33; }
+  .card-inner { background:linear-gradient(160deg,#171a2b,#0c0d16); border-radius:19px; padding:32px 26px 26px; display:flex; flex-direction:column; gap:12px; }
+  .card h1 { font-size:58px; margin:0; }
+  .card h1 span { background:var(--holo); background-size:300% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; animation:holo 8s linear infinite; }
+  .card p { color:var(--muted); margin:0 0 8px; font-size:14px; line-height:1.5; }
+  #lobbyStatus { color:#ffb3c0; font-size:13px; margin:0; min-height:1em; }
+
+  #room { display:none; flex-direction:column; height:100vh; }
+  #bar { position:sticky; top:0; z-index:2; display:flex; gap:8px; padding:10px 16px; flex-wrap:wrap; align-items:center;
+         background:#0b0c16cc; backdrop-filter:blur(14px); border-bottom:1px solid var(--line); }
+  #bar .brand { font-size:28px; }
+  #bar .code { font-weight:700; color:var(--gold); background:#ffd25e14; border:1px solid #ffd25e40; padding:5px 12px; border-radius:999px; font-size:14px; }
+  #bar .spacer { flex:1; }
+  #bar label { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--muted); }
+  #status { color:var(--muted); font-size:13px; }
+
+  #main { flex:1; display:flex; min-height:0; }
+  #grid { flex:1; display:flex; flex-wrap:wrap; align-items:flex-start; align-content:flex-start; gap:14px; padding:16px; overflow:auto; }
+  /* each viewer can drag the bottom-right corner to resize one tile (local only) */
+  .tile { position:relative; border-radius:16px; cursor:pointer; box-shadow:0 12px 30px #0008; transition:transform .2s;
+          width:min(var(--tile),100%); min-width:160px; max-width:100%; resize:horizontal; overflow:hidden; }
+  .tile:hover { transform:translateY(-2px); }
+  .inner { position:relative; border-radius:16px; overflow:hidden; background:var(--panel); border:1px solid var(--line); }
+  .cam { position:relative; aspect-ratio:4/3; background:#000; container-type:size; overflow:hidden; }
+  .cam video { width:100%; height:100%; object-fit:contain; display:block; transform:rotate(var(--rot,0deg)) scale(var(--zoom,1)); }
+  /* 90/270°: swap the video box dimensions so it still fits the frame once rotated */
+  .cam.sideways video { position:absolute; left:50%; top:50%; width:100cqh; height:100cqw; translate:-50% -50%; }
+  .label { position:absolute; left:10px; bottom:10px; background:#000b; backdrop-filter:blur(6px); padding:5px 12px;
+           border-radius:999px; font-size:13px; font-weight:600; }
+
+  /* set band under the camera: name + auto-scrolling card strip */
+  .set { padding:8px 10px 10px; display:flex; flex-direction:column; gap:6px; }
+  .set[hidden] { display:none; }
+  .setname { font-family:'Bebas Neue',Impact,sans-serif; font-size:22px; letter-spacing:.04em; color:var(--gold); }
+  .strip { overflow:hidden; mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent); }
+  .strip:empty, .track:empty { display:none; }
+  .track { display:flex; width:max-content; animation:scroll linear infinite; }
+  .track img { height:180px; aspect-ratio:63/88; object-fit:cover; border-radius:6px; margin-right:8px; background:#000; }
+
+  /* focused tile = the one opening: animated holo frame */
+  .tile.focus { width:100% !important; resize:none; padding:3px; box-shadow:0 0 50px #b06eff44; }
+  .tile.focus::before { content:''; position:absolute; inset:0; border-radius:16px; background:var(--holo); background-size:300% 100%; animation:holo 6s linear infinite; }
+  .tile.focus .inner { border:none; border-radius:13px; }
+  .tile.focus .cam { aspect-ratio:auto; height:min(80vh, calc(var(--tile) * 1.6)); }
+  .tile.focus .track img { height:300px; }
+  .tile.focus .label::after { content:' · en train d’ouvrir'; color:var(--gold); }
+
+  dialog { background:linear-gradient(160deg,#171a2b,#0c0d16); color:var(--text); border:1px solid var(--line); border-radius:20px;
+           width:min(460px,calc(100% - 32px)); padding:24px; box-shadow:0 30px 80px #000c; }
+  dialog::backdrop { background:#000a; backdrop-filter:blur(4px); }
+  dialog form { display:flex; flex-direction:column; gap:12px; }
+  dialog h2 { margin:0; font-size:34px; }
+  dialog p { margin:0; color:var(--muted); font-size:13px; line-height:1.5; }
+  dialog .row { display:flex; gap:8px; justify-content:flex-end; }
+
+  #chat { width:300px; display:flex; flex-direction:column; border-left:1px solid var(--line); background:#0b0c16cc; }
+  #msgs { flex:1; overflow:auto; padding:12px; display:flex; flex-direction:column; gap:8px; font-size:14px; line-height:1.4; overflow-wrap:anywhere; }
+  #msgs b { color:var(--gold); }
+  #chatForm { display:flex; gap:6px; padding:10px; border-top:1px solid var(--line); }
+  #chatForm input { flex:1; min-width:0; }
+  .viewer .cam-only { display:none; }
+
+  @media (max-width:600px) { .card h1 { font-size:46px; } #bar .brand { display:none; }
+    #main { flex-direction:column; } #chat { width:auto; height:40vh; border-left:none; border-top:1px solid var(--line); } }
+</style>
+</head>
+<body>
+
+<section id="lobby">
+  <div class="card holo">
+    <div class="card-inner">
+      <span class="live">LIVE</span>
+      <h1 class="brand">Pack<br><span>Opening</span></h1>
+      <p>Crée une salle (code généré automatiquement) et partage-le à tes potes, ou rejoins une salle existante.</p>
+      <input id="name" placeholder="Ton pseudo" maxlength="20" aria-label="Pseudo">
+      <input id="code" placeholder="Code de salle (pour rejoindre)" maxlength="30" aria-label="Code de salle">
+      <select id="setPick" aria-label="Set à ouvrir"></select>
+      <button class="main holo" id="create">Créer une salle</button>
+      <button id="joinOpen">Rejoindre en ouvreur</button>
+      <button id="joinWatch">Rejoindre en spectateur</button>
+      <p id="lobbyStatus" role="alert"></p>
+    </div>
+  </div>
+</section>
+
+<section id="room">
+  <div id="bar">
+    <span class="brand">Pack Opening</span>
+    <span class="live">LIVE</span>
+    <span class="code" id="roomCode"></span>
+    <span id="status"></span>
+    <span class="spacer"></span>
+    <label>Taille <input type="range" id="zoom" min="160" max="900" step="10" value="360"></label>
+    <button id="setBtn" class="cam-only">Mon set</button>
+    <button id="flip" class="cam-only">Changer caméra</button>
+    <button id="rotate" class="cam-only">Pivoter</button>
+    <label class="cam-only">Zoom cam <input type="range" id="camZoom" min="1" max="4" step="0.1" value="1"></label>    <button id="share">Copier le lien</button>
+    <button id="leave" class="danger">Quitter</button>
+  </div>
+  <div id="main">
+    <div id="grid"></div>
+    <aside id="chat">
+      <div id="msgs" aria-live="polite"></div>
+      <form id="chatForm">
+        <input id="chatInput" placeholder="Message…" maxlength="300" aria-label="Message" autocomplete="off">
+        <button>Envoyer</button>
+      </form>
+    </aside>
+  </div>
+</section>
+
+<dialog id="setDlg">
+  <form method="dialog">
+    <h2 class="brand">Le set que tu ouvres</h2>
+    <input id="setName" placeholder="Ex : Topps Chrome UCL 2025/26" maxlength="60" aria-label="Nom du set">
+    <p>Images de cartes du set (optionnel) : colle une URL d’image par ligne. Astuce : clic droit sur une image → « Copier l’adresse de l’image ».</p>
+    <textarea id="setCards" placeholder="https://…/carte1.jpg&#10;https://…/carte2.jpg" aria-label="URLs des images de cartes"></textarea>
+    <div class="row">
+      <button value="cancel">Annuler</button>
+      <button class="main holo" value="save" id="setSave">Enregistrer</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const $ = id => document.getElementById(id);
+const PREFIX = 'tcgopen-';
+let peer, stream, myName, roomId, viewer = false;
+let facing = 'environment';
+const calls = {};              // peerId -> MediaConnection
+const conns = {};              // peerId -> DataConnection (used to sync sets)
+const names = {};              // peerId -> pseudo (host keeps the room roster here)
+const sets = {};               // peerId ('me' for self) -> { name, cards[] }
+const rots = {};               // peerId ('me' for self) -> camera rotation in degrees
+const zooms = {};              // peerId ('me' for self) -> digital zoom factor
+
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+$('code').value = decodeURIComponent(location.hash.slice(1));
+$('name').value = store.get('tcg-name') || '';
+rots.me = cleanRot(store.get('tcg-rot'));
+zooms.me = cleanZoom(store.get('tcg-camzoom'));
+$('camZoom').value = zooms.me;
+try { sets.me = cleanSet(JSON.parse(store.get('tcg-set') || '{}')); } catch { sets.me = cleanSet({}); }
+
+// saved sets library (per browser), seeded with the current set
+let lib = [];
+try { lib = JSON.parse(store.get('tcg-sets') || '[]').map(cleanSet).filter(s => s.name); } catch {}
+if (sets.me.name && !lib.some(s => s.name === sets.me.name)) lib.unshift(sets.me);
+store.set('tcg-sets', JSON.stringify(lib));
+
+function fillSetPick() {
+  const sel = $('setPick');
+  sel.replaceChildren(new Option('— Nouveau set —', ''));
+  for (const s of lib) sel.append(new Option(s.name, s.name));
+  sel.value = lib.some(s => s.name === sets.me.name) ? sets.me.name : '';
+}
+fillSetPick();
+applyZoom(store.get('tcg-zoom') || 360);
+
+$('create').onclick = () => join(false, true);
+$('joinOpen').onclick = () => join(false, false);
+$('joinWatch').onclick = () => join(true, false);
+
+// 4-char room code, no look-alike chars (0/o, 1/l/i)
+function newCode() {
+  const abc = 'abcdefghjkmnpqrstuvwxyz23456789';
+  return Array.from(crypto.getRandomValues(new Uint8Array(4)), b => abc[b % abc.length]).join('');
+}
+
+// viewer = no camera: we never call anyone, broadcasters call us when our data link opens
+async function join(asViewer, create) {
+  myName = $('name').value.trim() || 'Anonyme';
+  const code = create ? newCode() : $('code').value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+  if (!code) return $('lobbyStatus').textContent = 'Il faut un code de salle.';
+  store.set('tcg-name', myName);
+  roomId = PREFIX + code;
+  location.hash = code;
+  viewer = asViewer;
+  if (!viewer) {
+    try {
+      stream = await getCamera();
+    } catch (e) {
+      return $('lobbyStatus').textContent = 'Caméra refusée ou indisponible : ' + e.message;
+    }
+  }
+  $('lobby').style.display = 'none';
+  $('room').style.display = 'flex';
+  $('room').classList.toggle('viewer', viewer);
+  $('roomCode').textContent = '#' + code;
+  if (!viewer) {
+    sets.me = lib.find(s => s.name === $('setPick').value) || cleanSet({});
+    store.set('tcg-set', JSON.stringify(sets.me));
+    addTile('me', myName + ' (toi)', stream);
+    if (!sets.me.name) openSetDialog();
+  }
+  create ? startAsHost() : startAsGuest();
+}
+
+function backToLobby(msg) {
+  peer?.destroy();
+  stream?.getTracks().forEach(t => t.stop());
+  stream = null;
+  for (const k in calls) delete calls[k];
+  for (const k in conns) delete conns[k];
+  $('grid').replaceChildren();
+  $('msgs').replaceChildren();
+  if ($('setDlg').open) $('setDlg').close();
+  $('room').style.display = 'none';
+  $('lobby').style.display = '';
+  $('lobbyStatus').textContent = msg;
+}
+
+async function getCamera() {
+  if (!navigator.mediaDevices?.getUserMedia)
+    throw new Error('page non sécurisée. Ouvre-la via http://localhost ou en https (pas en file:// ni via une IP en http).');
+  const video = { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 960 } };
+  try {
+    return await navigator.mediaDevices.getUserMedia({ video });
+  } catch (e) {
+    if (e.name === 'NotAllowedError') throw new Error('permission refusée. Clique sur le cadenas de la barre d’adresse et autorise la caméra.');
+    if (e.name === 'NotReadableError') throw new Error('caméra déjà utilisée par une autre appli (Teams, Discord, OBS…). Ferme-la et réessaie.');
+    throw new Error(e.name === 'NotFoundError' ? 'aucune caméra détectée.' : e.name + ' – ' + e.message);
+  }
+}
+
+// The room id is the host's peer id: claiming it fails if the room already exists.
+function startAsHost() {
+  peer = new Peer(roomId);
+  peer.on('open', () => { status('Salle créée. Partage le lien !'); });
+  peer.on('error', err => {
+    if (err.type === 'unavailable-id') return backToLobby('Code déjà pris, reclique sur « Créer une salle ».');
+    status('Erreur : ' + err.type);
+  });
+  peer.on('connection', conn => {
+    link(conn);
+    conn.on('open', () => {
+      // send current roster so the newcomer calls everyone (full mesh)
+      conn.send({ roster: { ...names, [roomId]: myName } });
+      names[conn.peer] = conn.metadata?.name || '?';
+    });
+    conn.on('close', () => delete names[conn.peer]);
+  });
+  peer.on('call', answer);
+}
+
+function startAsGuest() {
+  peer = new Peer();
+  peer.on('call', answer);
+  peer.on('connection', link);
+  let joined = false;
+  peer.on('error', err => {
+    if (err.type === 'peer-unavailable' && !joined && err.message?.includes(roomId))
+      return backToLobby('Salle introuvable : vérifie le code ou crée-la.');
+    status(err.type === 'peer-unavailable' ? 'Un participant est injoignable.' : 'Erreur : ' + err.type);
+  });
+  peer.on('open', () => {
+    status('Connexion à la salle…');
+    const meta = { name: myName, viewer };
+    const conn = link(peer.connect(roomId, { metadata: meta }));
+    conn.on('data', d => {
+      if (!d?.roster) return;
+      joined = true;
+      for (const [id, name] of Object.entries(d.roster)) {
+        if (id === peer.id) continue;
+        if (stream) dial(id, name);
+        if (id !== roomId) link(peer.connect(id, { metadata: meta }));
+      }
+      status('Connecté.');
+    });
+    conn.on('close', () => status('L’hôte a quitté la salle.'));
+  });
+}
+
+// data channel to one peer: we push our set on open and on every change
+function link(conn) {
+  conns[conn.peer] = conn;
+  conn.on('open', () => {
+    if (!viewer) conn.send({ set: sets.me, rot: rots.me, zoom: zooms.me });
+    // a viewer has no stream to call us with: we call it (it answers receive-only)
+    if (stream && conn.metadata?.viewer && !calls[conn.peer]) dial(conn.peer, conn.metadata.name || '?');
+  });
+  conn.on('data', d => {
+    if (d?.set) { sets[conn.peer] = cleanSet(d.set); renderSet(conn.peer); }
+    if (d && 'rot' in d) { rots[conn.peer] = cleanRot(d.rot); applyRot(conn.peer); }
+    if (d && 'zoom' in d) { zooms[conn.peer] = cleanZoom(d.zoom); applyRot(conn.peer); }
+    if (d?.chat) addMsg(d.chat.name, d.chat.text);
+  });
+  conn.on('close', () => delete conns[conn.peer]);
+  return conn;
+}
+
+function dial(id, name) {
+  const call = peer.call(id, stream, { metadata: { name: myName } });
+  track(call, name);
+}
+
+function answer(call) {
+  call.answer(stream);
+  track(call, call.metadata?.name || '?');
+}
+
+function track(call, name) {
+  calls[call.peer] = call;
+  call.on('stream', s => addTile(call.peer, name, s));
+  const drop = () => { delete calls[call.peer]; document.getElementById('t-' + call.peer)?.remove(); };
+  call.on('close', drop);
+  call.on('error', drop);
+  // PeerJS 'close' often never fires when a tab is closed; watch ICE state instead
+  const pc = call.peerConnection;
+  if (pc) pc.addEventListener('iceconnectionstatechange', () => {
+    if (['failed', 'closed', 'disconnected'].includes(pc.iceConnectionState)) setTimeout(() => {
+      if (['failed', 'closed', 'disconnected'].includes(pc.iceConnectionState)) drop();
+    }, 4000);
+  });
+}
+
+function addTile(id, label, s) {
+  let tile = document.getElementById('t-' + id);
+  if (!tile) {
+    tile = document.createElement('div');
+    tile.className = 'tile';
+    tile.id = 't-' + id;
+    tile.innerHTML = '<div class="inner"><div class="set" hidden><span class="setname"></span><div class="strip"><div class="track"></div></div></div>'
+      + '<div class="cam"><video autoplay playsinline muted></video><span class="label"></span></div></div>';
+    // dragging the resize handle also fires a click: ignore it if the width changed
+    let w0 = 0;
+    tile.onpointerdown = () => { w0 = tile.offsetWidth; };
+    tile.onclick = () => {
+      if (tile.offsetWidth !== w0) return;
+      const was = tile.classList.contains('focus');
+      document.querySelectorAll('.tile.focus').forEach(t => t.classList.remove('focus'));
+      if (!was) { tile.classList.add('focus'); $('grid').prepend(tile); }
+    };
+    $('grid').append(tile);
+  }
+  const v = tile.querySelector('video');
+  v.srcObject = s;
+  tile.querySelector('.label').textContent = label;
+  renderSet(id);
+  applyRot(id);
+}
+
+// rotation comes from peers: untrusted, keep only quarter turns
+function cleanRot(r) { r = +r; return [0, 90, 180, 270].includes(r) ? r : 0; }
+// zoom comes from peers too: clamp to the slider range
+function cleanZoom(z) { z = +z; return z >= 1 && z <= 4 ? z : 1; }
+
+// applies rotation + zoom of one tile
+function applyRot(id) {
+  const cam = document.querySelector('#t-' + CSS.escape(id) + ' .cam');
+  if (!cam) return;
+  const r = rots[id] || 0;
+  cam.style.setProperty('--rot', r + 'deg');
+  cam.style.setProperty('--zoom', zooms[id] || 1);
+  cam.classList.toggle('sideways', r % 180 !== 0);
+}
+
+$('rotate').onclick = () => {
+  rots.me = (rots.me + 90) % 360;
+  store.set('tcg-rot', rots.me);
+  applyRot('me');
+  for (const c of Object.values(conns)) if (c.open) c.send({ rot: rots.me });
+};
+
+$('camZoom').oninput = e => {
+  zooms.me = cleanZoom(e.target.value);
+  store.set('tcg-camzoom', zooms.me);
+  applyRot('me');
+  for (const c of Object.values(conns)) if (c.open) c.send({ zoom: zooms.me });
+};
+
+// set data comes from other peers: untrusted, so clamp sizes and keep only http(s) image URLs
+function cleanSet(s) {
+  const cards = Array.isArray(s?.cards) ? s.cards : [];
+  return {
+    name: String(s?.name || '').slice(0, 60),
+    cards: cards.filter(u => typeof u === 'string' && /^https?:\/\/\S+$/i.test(u) && u.length <= 1000).slice(0, 20),
+  };
+}
+
+function renderSet(id) {
+  const tile = document.getElementById('t-' + id);
+  const s = sets[id];
+  if (!tile || !s) return;
+  const box = tile.querySelector('.set');
+  box.hidden = !s.name && !s.cards.length;
+  tile.querySelector('.setname').textContent = s.name || 'Set mystère';
+  const trackEl = tile.querySelector('.track');
+  trackEl.replaceChildren();
+  if (!s.cards.length) return;
+  // repeat until the strip is wide enough, then double it so translateX(-50%) loops seamlessly
+  let base = s.cards;
+  while (base.length < 8) base = base.concat(s.cards);
+  for (const url of base.concat(base)) {
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = '';
+    img.loading = 'lazy';
+    img.referrerPolicy = 'no-referrer';
+    img.onerror = () => img.remove();
+    trackEl.append(img);
+  }
+  trackEl.style.animationDuration = base.length * 3 + 's';
+}
+
+function openSetDialog() {
+  $('setName').value = sets.me.name;
+  $('setCards').value = sets.me.cards.join('\n');
+  $('setDlg').returnValue = ''; // Escape keeps the previous returnValue otherwise
+  $('setDlg').showModal();
+}
+
+$('setDlg').addEventListener('close', () => {
+  if ($('setDlg').returnValue !== 'save') return;
+  sets.me = cleanSet({ name: $('setName').value.trim(), cards: $('setCards').value.split(/\s+/).filter(Boolean) });
+  store.set('tcg-set', JSON.stringify(sets.me));
+  if (sets.me.name) {
+    lib = [sets.me, ...lib.filter(s => s.name !== sets.me.name)];
+    store.set('tcg-sets', JSON.stringify(lib));
+    fillSetPick();
+  }
+  renderSet('me');
+  for (const c of Object.values(conns)) if (c.open) c.send({ set: sets.me });
+});
+$('setBtn').onclick = openSetDialog;
+
+function applyZoom(px) {
+  document.documentElement.style.setProperty('--tile', px + 'px');
+  document.querySelectorAll('.tile').forEach(t => t.style.width = ''); // slider resets per-tile sizes
+  $('zoom').value = px;
+}
+$('zoom').oninput = e => { applyZoom(e.target.value); store.set('tcg-zoom', e.target.value); };
+
+function status(msg) { $('status').textContent = msg; }
+
+// chat text comes from peers: untrusted, so textContent only and clamp sizes
+function addMsg(name, text) {
+  const p = document.createElement('div');
+  const b = document.createElement('b');
+  b.textContent = String(name || '?').slice(0, 20) + ' ';
+  p.append(b, String(text || '').slice(0, 300));
+  const box = $('msgs');
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  box.append(p);
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+$('chatForm').onsubmit = e => {
+  e.preventDefault();
+  const text = $('chatInput').value.trim();
+  if (!text) return;
+  $('chatInput').value = '';
+  addMsg(myName, text);
+  for (const c of Object.values(conns)) if (c.open) c.send({ chat: { name: myName, text } });
+};
+
+$('flip').onclick = async () => {
+  facing = facing === 'environment' ? 'user' : 'environment';
+  try {
+    const fresh = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 960 } } });
+    const newTrack = fresh.getVideoTracks()[0];
+    const old = stream.getVideoTracks()[0];
+    stream.removeTrack(old); old.stop(); stream.addTrack(newTrack);
+    for (const call of Object.values(calls)) {
+      call.peerConnection?.getSenders().find(s => s.track?.kind === 'video')?.replaceTrack(newTrack);
+    }
+    document.querySelector('#t-me video').srcObject = stream;
+  } catch (e) { status('Impossible de changer de caméra.'); }
+};
+
+$('share').onclick = async () => {
+  try { await navigator.clipboard.writeText(location.href); status('Lien copié !'); }
+  catch { prompt('Copie ce lien :', location.href); }
+};
+
+$('leave').onclick = () => { peer?.destroy(); stream?.getTracks().forEach(t => t.stop()); location.reload(); };
+</script>
+</body>
+</html>
